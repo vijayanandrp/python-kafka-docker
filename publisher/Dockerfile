@@ -2,7 +2,7 @@
 ARG BASE_CONTAINER=python:3.8
 
 # Set the base image 
-FROM --platform=linux/amd64 $BASE_CONTAINER
+FROM --platform=linux/arm64 $BASE_CONTAINER
 
 # Adds metadata to image.
 LABEL maintainer="Fernando"
