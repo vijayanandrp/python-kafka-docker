@@ -1,33 +1,90 @@
-# Set python version
-ARG BASE_CONTAINER=python:3.8
+version: "3"
 
-# Set the base image 
-FROM --platform=linux/arm64 $BASE_CONTAINER
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest-ubi8.arm64
+    container_name: zookeeper
+    networks:
+      - broker-kafka
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
 
-# Adds metadata to image.
-LABEL maintainer="Fernando"
+  kafka:
+    image: confluentinc/cp-kafka:latest-ubi8.arm64
+    container_name: kafka
+    networks:
+      - broker-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ADVERTISED_HOST_NAME: kafka:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
 
-# dont write pyc files
-ENV PYTHONDONTWRITEBYTECODE 1
-# dont buffer to stdout/stderr
-ENV PYTHONUNBUFFERED 1
+  kafdrop:
+    image: jmpalomar/kafdrop:3.29.0 # obsidiandynamics/kafdrop:3.27.0 
+    networks:
+      - broker-kafka
+    depends_on:
+      - kafka
+      - zookeeper
+    ports:
+      - 19000:9000
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092
 
-# Sets the user name to use when running the image.
-USER root
-RUN apt update && \
-    apt install --no-install-recommends -y build-essential gcc && \
-    apt clean && rm -rf /var/lib/apt/lists/*
+  consumer:
+    container_name: consumer
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    environment:
+      - KAFKA_TOPIC_NAME=topic_test
+      - KAFKA_SERVER=kafka
+      - KAFKA_PORT=29092
+    ports:
+      - 8001:8001
+    restart: "always"
+    depends_on:
+      - zookeeper
+      - kafka
+      - publisher
+    networks:
+      - broker-kafka
 
-# Make a directory for our app
-WORKDIR /publisher
+  publisher:
+    container_name: publisher
+    build:
+      context: ./publisher
+      dockerfile: Dockerfile
+    environment:
+      - KAFKA_TOPIC_NAME=topic_test
+      - KAFKA_SERVER=kafka
+      - KAFKA_PORT=29092
+    ports:
+      - 8000:8000
+    restart: "always"
+    depends_on:
+      - zookeeper
+      - kafka
+    networks:
+      - broker-kafka
 
-
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
-
-# Copy source code
-COPY ./app ./app
-
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+networks:
+  broker-kafka:
+    driver: bridge
